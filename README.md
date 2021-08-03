@@ -1,0 +1,2 @@
+# ApplicationSuiteExtAux
+ApplicationSuite extendable auxiliary
