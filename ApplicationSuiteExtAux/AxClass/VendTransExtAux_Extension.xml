@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>VendTransExtAux_Extension</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+/// VendTrans table extension class.
+/// </summary>
+[ExtensionOf(tableStr(VendTrans))] 
+final class VendTransExtAux_Extension
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>reverseTransactExtAux</Name>
+				<Source><![CDATA[
+    public static boolean reverseTransactExtAux(
+        Common _common,
+        LedgerVoucher _parentLedgerVoucher = null,
+        SettleDatePrinc _datePrinciple = SettleDatePrinc::DateOfPayment,
+        TransDate _saveDate = dateNull(),
+        boolean _useDatePrinciple = true,
+        Voucher _paymentVoucher = '')
+    {
+        LedgerVoucher reversalLedgerVoucher;
+        CustVendReversePostingExt custVendReversePosting;
+        TransDate transDate;
+        LedgerVoucherGroup ledgerVoucherGroup;
+        VendTable vendTable;
+        LedgerJournalTrans ledgerJournalTrans;
+        str account;
+        // <GEERU>
+        SettleDatePrinc datePrinciple;
+        #ISOCountryRegionCodes
+        boolean countryRegion_RU = SysCountryRegionCode::isLegalEntityInCountryRegion([#isoRU]);
+        // </GEERU>
+
+        switch (_common.TableId)
+        {
+            case tableNum(VendTable) :
+                vendTable = _common;
+                transDate = vendTable.getSettleDate(_datePrinciple, _saveDate);
+                account = vendTable.AccountNum;
+                break;
+
+            case tableNum(LedgerJournalTrans) :
+                ledgerJournalTrans = _common;
+                transDate = ledgerJournalTrans.TransDate;
+                account = ledgerJournalTrans.parmAccount();
+                break;
+
+            default:
+                throw error(Error::wrongUseOfFunction(funcName()));
+        }
+
+        ttsbegin;
+
+        ledgerVoucherGroup = LedgerVoucherGroup::construct();
+
+        custVendReversePosting = CustVendReversePostingExt::construct(_common, ledgerVoucherGroup);
+        custVendReversePosting.parmTransDate(transDate);
+        // <GEERU>
+        if (! TaxParameters::find().ReverseSettlementDatePrinciple_W
+         && ! countryRegion_RU)
+        {
+            // </GEERU>
+            custVendReversePosting.parmDatePrinciple(_datePrinciple);
+            // <GEERU>
+        }
+        if (countryRegion_RU)
+        {
+            datePrinciple = custVendReversePosting.parmDatePrinciple();
+        }
+        // </GEERU>
+        if (_parentLedgerVoucher != null)
+        {
+            custVendReversePosting.parmParentVoucher(_parentLedgerVoucher.lastVoucher());
+        }
+        // <GEERU>
+        if (countryRegion_RU
+            && ! _useDatePrinciple)
+        {
+            custVendReversePosting.parmDatePrinciple(_datePrinciple);
+            custVendReversePosting.parmSaveDate_W(_saveDate);
+        }
+        // </GEERU>
+
+        // <GBR>
+        if (BrazilParameters::isEnabled())
+        {
+            custVendReversePosting.parmPaymentVoucher_BR(_paymentVoucher);
+        }
+        // <GBR>
+
+        custVendReversePosting.updateNow();
+        // <GEERU>
+        if (countryRegion_RU)
+        {
+            custVendReversePosting.parmDatePrinciple(datePrinciple);
+        }
+        // </GEERU>
+
+        // Validate and post the ledger voucher group for reverse settlement
+        ledgerVoucherGroup.end();
+
+        VendTrans::updateBudgetForCashDiscounts_PSN(ledgerVoucherGroup);
+
+        if (countryRegion_RU)
+        {
+            CustVendReversePostingLog_RU::createTransLink(custVendReversePosting.parmReversePostingLogSet_RU());
+        }
+
+        // if the _parentLedgerVoucher was passed is not null this means that this reversal is being done in the
+        // same database transactions as the some other transaction, and these transaction must be linked.
+        // The _parentLedgerVoucher is null this means that the reversal is not being done as part of a larger
+        // transaction, this is not an error.
+        if (_parentLedgerVoucher != null && _parentLedgerVoucher.parmCompanyId() == curext())
+        {
+            reversalLedgerVoucher = ledgerVoucherGroup.findLedgerVoucher(curext(), custVendReversePosting.findNumberSequenceCodeByCompany(curext()));
+
+            if (reversalLedgerVoucher != null)
+            {
+                reversalLedgerVoucher.createVoucherLinks(_parentLedgerVoucher.lastVoucher(), _parentLedgerVoucher.lastTransDate());
+            }
+        }
+
+        TransactionLog::create(TransactionLogType::VendTransEdit, strFmt("@SYS82246", account));
+
+        ledgerVoucherGroup.createTransactionLog(TransactionLogType::VendTransEdit, "@SYS91317");
+
+        ttscommit;
+
+        return true;
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>
